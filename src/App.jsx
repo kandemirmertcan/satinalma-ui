@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 /**
  * Satınalma SaaS — UI Prototip
@@ -88,6 +88,69 @@ function money(n) {
   const x = toNumber(n);
   return x.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+
+
+function downloadBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function toCsv(rows, headers) {
+  const esc = (v) => {
+    const s = v == null ? "" : String(v);
+    if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  };
+  const lines = [];
+  lines.push(headers.map((h) => esc(h.label)).join(","));
+  for (const r of rows) lines.push(headers.map((h) => esc(r[h.key])).join(","));
+  return "\n" + lines.join("\n");
+}
+
+async function exportToXlsx({ filename, sheetName, rows, headers }) {
+  // XLSX (SheetJS) yoksa CSV fallback
+  try {
+    const XLSX = await import("xlsx");
+    const data = rows.map((r) => {
+      const o = {};
+      for (const h of headers) o[h.label] = r[h.key];
+      return o;
+    });
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, sheetName || "Veri");
+    const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    downloadBlob(
+      filename,
+      new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
+    );
+  } catch (e) {
+    const csv = toCsv(rows, headers);
+    downloadBlob(filename.replace(/\.xlsx$/i, ".csv"), new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    alert("XLSX kütüphanesi bulunamadı. CSV indirildi. XLSX için: npm i xlsx");
+  }
+}
+
+function normHeader(s) {
+  return String(s || "")
+    .trim()
+    .toLowerCase()
+    .replace(/ı/g, "i")
+    .replace(/ğ/g, "g")
+    .replace(/ü/g, "u")
+    .replace(/ş/g, "s")
+    .replace(/ö/g, "o")
+    .replace(/ç/g, "c")
+    .replace(/\s+/g, " ")
+    .replace(/[^a-z0-9 ]/g, "");
+}
+
 
 /** Input içinde "binlik ayırıcı eklemeden" gösterim (kırpılmış ondalık) */
 function formatForInput(n, maxDecimals = 6) {
@@ -231,6 +294,72 @@ function ReadOnly({ label, value }) {
   );
 }
 
+
+
+function SimpleBarChart({ title, data, labelKey = "label", valueKey = "value", height = 180 }) {
+  const max = Math.max(1, ...data.map((d) => toNumber(d[valueKey] ?? 0)));
+  const barW = 24;
+  const gap = 10;
+  const pad = 16;
+  const w = Math.max(320, pad * 2 + data.length * (barW + gap));
+  return (
+    <div className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+      {title ? <div className="text-sm font-semibold text-slate-900">{title}</div> : null}
+      <div className="mt-3 overflow-x-auto">
+        <svg width={w} height={height}>
+          <line x1={pad} y1={height - pad} x2={w - pad} y2={height - pad} stroke="currentColor" opacity="0.15" />
+          {data.map((d, i) => {
+            const v = toNumber(d[valueKey] ?? 0);
+            const h = ((height - pad * 2) * v) / max;
+            const x = pad + i * (barW + gap);
+            const y = height - pad - h;
+            return (
+              <g key={i}>
+                <rect x={x} y={y} width={barW} height={h} rx="6" className="fill-slate-900 opacity-80" />
+                <text x={x + barW / 2} y={height - 4} textAnchor="middle" fontSize="10" className="fill-slate-600">
+                  {String(d[labelKey] ?? "").slice(0, 10)}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+function SimpleLineChart({ title, data, labelKey = "label", valueKey = "value", height = 180 }) {
+  const max = Math.max(1, ...data.map((d) => toNumber(d[valueKey] ?? 0)));
+  const pad = 18;
+  const w = Math.max(420, pad * 2 + data.length * 40);
+  const pts = data.map((d, i) => {
+    const x = pad + i * 40;
+    const v = toNumber(d[valueKey] ?? 0);
+    const y = height - pad - ((height - pad * 2) * v) / max;
+    return { x, y, v, label: d[labelKey] };
+  });
+  const dPath = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
+  return (
+    <div className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+      {title ? <div className="text-sm font-semibold text-slate-900">{title}</div> : null}
+      <div className="mt-3 overflow-x-auto">
+        <svg width={w} height={height}>
+          <line x1={pad} y1={height - pad} x2={w - pad} y2={height - pad} stroke="currentColor" opacity="0.15" />
+          <path d={dPath} fill="none" stroke="currentColor" strokeWidth="2" opacity="0.85" />
+          {pts.map((p, i) => (
+            <g key={i}>
+              <circle cx={p.x} cy={p.y} r="4" className="fill-slate-900" />
+              <text x={p.x} y={height - 4} textAnchor="middle" fontSize="10" className="fill-slate-600">
+                {String(p.label ?? "").slice(0, 10)}
+              </text>
+            </g>
+          ))}
+        </svg>
+      </div>
+    </div>
+  );
+}
+
 function Th({ children, sortKey, sort, onSort, align }) {
   const active = sort.key === sortKey;
   const cls = "px-3 py-3 font-medium select-none whitespace-nowrap " + (align === "right" ? "text-right" : "text-left");
@@ -336,7 +465,18 @@ export default function App() {
   }));
   const [invoiceCreateLines, setInvoiceCreateLines] = useState(() => Array.from({ length: 5 }).map(() => blankInvoiceLine()));
   const [createUnitNetRaw, setCreateUnitNetRaw] = useState({}); // { [key]: string }
-  const [createUnitVatRaw, setCreateUnitVatRaw] = useState({}); // { [key]: string }
+  const [createUnitVatRaw, setCreateUnitVatRaw] = useState({});
+
+  // Excel Import (Satınalımlar)
+  const importInputRef = useRef(null);
+
+  // Rapor Filtreleri (prototip)
+  const [reportFrom, setReportFrom] = useState("");
+  const [reportTo, setReportTo] = useState("");
+  const [reportSupplier, setReportSupplier] = useState("ALL");
+  const [reportItem, setReportItem] = useState("ALL");
+  const [reportMetric, setReportMetric] = useState("totalVatIncl"); // totalNet | totalVatIncl
+ // { [key]: string }
 
   // Tedarikçi / Kalem modalları (global)
   const [supplierModalOpen, setSupplierModalOpen] = useState(false);
@@ -437,7 +577,151 @@ export default function App() {
     setSort((prev) => (prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
   }
 
-  function openEditLine(lineId) {
+  
+
+  const purchaseExportHeaders = [
+    { key: "date", label: "Tarih" },
+    { key: "supplierName", label: "Tedarikçi Adı" },
+    { key: "invoiceNo", label: "Fatura No" },
+    { key: "invoiceItem", label: "Fatura Kalemi" },
+    { key: "qty", label: "Adet" },
+    { key: "unitType", label: "Birim Türü" },
+    { key: "unitPrice", label: "Birim Fiyat" },
+    { key: "discountRate", label: "İskonto Oranı" },
+    { key: "unitNet", label: "İskontolu Birim Fiyat" },
+    { key: "vatRate", label: "KDV Oranı" },
+    { key: "unitVatIncl", label: "KDV Dahil Birim Fiyat" },
+    { key: "totalNet", label: "KDV Hariç Toplam Tutar" },
+    { key: "totalVatIncl", label: "KDV Dahil Toplam Tutar" },
+  ];
+
+  function buildExportRows(viewRows) {
+    return viewRows.map((r) => {
+      const c = calcLine(r);
+      return {
+        date: r.date,
+        supplierName: r.supplierName,
+        invoiceNo: r.invoiceNo,
+        invoiceItem: r.invoiceItem,
+        qty: r.qty,
+        unitType: r.unitType,
+        unitPrice: r.unitPrice,
+        discountRate: r.discountRate,
+        unitNet: c.unitNet ? String(c.unitNet) : "",
+        vatRate: r.vatRate,
+        unitVatIncl: c.unitVatIncl ? String(c.unitVatIncl) : "",
+        totalNet: c.totalNet ? String(c.totalNet) : "",
+        totalVatIncl: c.totalVatIncl ? String(c.totalVatIncl) : "",
+      };
+    });
+  }
+
+  async function exportPurchasesXlsx() {
+    const rows = buildExportRows(sorted); // filtre + sıralama uygulanmış görünüm
+    await exportToXlsx({ filename: "satinalim_gorunum.xlsx", sheetName: "Satınalımlar", rows, headers: purchaseExportHeaders });
+  }
+
+  async function handleImportFile(file) {
+    if (!file) return;
+
+    // CSV destek (kolay fallback)
+    const name = String(file.name || "").toLowerCase();
+    if (name.endsWith(".csv")) {
+      const text = await file.text();
+      const linesCsv = text.split(/\r?\n/).filter(Boolean);
+      if (linesCsv.length < 2) return alert("CSV boş.");
+      const headers = linesCsv[0].split(",").map((h) => normHeader(h));
+      const rows = linesCsv.slice(1).map((ln) => {
+        const parts = ln.split(",");
+        const obj = {};
+        headers.forEach((h, i) => (obj[h] = (parts[i] ?? "").replace(/^"|"$/g, "")));
+        return obj;
+      });
+      // CSV için minimum mapping (tavsiye: XLSX)
+      return alert("CSV import prototipte sınırlı. XLSX önerilir (npm i xlsx).");
+    }
+
+    try {
+      const XLSX = await import("xlsx");
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const raw = XLSX.utils.sheet_to_json(ws, { defval: "" });
+
+      // Header normalize
+      const mapped = raw.map((r) => {
+        const o = {};
+        for (const [k, v] of Object.entries(r)) o[normHeader(k)] = v;
+        return o;
+      });
+
+      const invoicesToAdd = [];
+      const linesToAdd = [];
+      const invoiceByKey = new Map();
+
+      mapped.forEach((r, idx) => {
+        const date = String(r["tarih"] || r["date"] || "").slice(0, 10);
+        const supplierName = String(r["tedarikci adi"] || r["tedarikci"] || r["supplier"] || "").trim();
+        const invoiceNo = String(r["fatura no"] || r["fatura"] || r["invoice no"] || "").trim();
+        const invoiceItem = String(r["fatura kalemi"] || r["kalem"] || r["item"] || "").trim();
+        const qty = String(r["adet"] || r["qty"] || "").trim();
+        const unitType = String(r["birim turu"] || r["birim"] || r["unit"] || "").trim();
+        const unitPrice = String(r["birim fiyat"] || r["unit price"] || "").trim();
+        const discountRate = String(r["iskonto orani"] || r["iskonto"] || r["discount"] || "").trim();
+        const vatRate = String(r["kdv orani"] || r["kdv"] || r["vat"] || "").trim();
+
+        const manualUnitNet = String(r["iskontolu birim fiyat"] || r["iskontolu birim"] || r["unit net"] || "").trim();
+        const manualUnitVat = String(r["kdv dahil birim fiyat"] || r["kdv dahil birim"] || r["unit vat incl"] || "").trim();
+
+        if (!supplierName || !date || !invoiceItem) return;
+
+        const key = invoiceNo ? `${supplierName}__${invoiceNo}__${date}` : `${supplierName}__${date}__row${idx}`;
+        let inv = invoiceByKey.get(key);
+        if (!inv) {
+          inv = {
+            id: uid(),
+            date,
+            supplierName,
+            invoiceNo,
+            currencyCode: "TRY",
+            paymentTermDays: "30",
+            tevfikatRate: "0",
+            discountTotal: "",
+          };
+          invoiceByKey.set(key, inv);
+          invoicesToAdd.push(inv);
+        }
+
+        let ln = {
+          id: uid(),
+          invoiceId: inv.id,
+          invoiceItem,
+          qty: qty || "1",
+          unitType: unitType || "Adet",
+          unitPrice: unitPrice || "0",
+          discountRate: discountRate || "0",
+          vatRate: vatRate || "20",
+        };
+
+        // Çift yönlü manuel alanlar (öncelik: iskontolu birim, sonra KDV dahil birim)
+        if (manualUnitNet) ln = deriveFromUnitNet(ln, manualUnitNet);
+        else if (manualUnitVat) ln = deriveFromUnitVatIncl(ln, manualUnitVat);
+
+        linesToAdd.push(ln);
+      });
+
+      if (invoicesToAdd.length === 0 || linesToAdd.length === 0) return alert("İçe aktarılacak satır bulunamadı.");
+
+      setInvoices((prev) => [...invoicesToAdd, ...prev]);
+      setLines((prev) => [...linesToAdd, ...prev]);
+
+      alert(`İçe aktarıldı: ${invoicesToAdd.length} fatura, ${linesToAdd.length} satır.`);
+    } catch (e) {
+      alert("XLSX okuma için kütüphane yok. Kurulum: npm i xlsx");
+    }
+  }
+
+function openEditLine(lineId) {
     const ln = lines.find((x) => x.id === lineId);
     if (!ln) return;
     setEditingLineId(lineId);
@@ -525,6 +809,56 @@ export default function App() {
 
     return { ...sums, discountComputed, tev, withheldVat, payableVat };
   }, [invoiceLines, invoiceDraft]);
+
+  const createComputed = useMemo(() => {
+    const valid = invoiceCreateLines.filter((x) => String(x.invoiceItem || "").trim());
+    const sums = valid.reduce(
+      (acc, ln) => {
+        const c = calcLine(ln);
+        acc.totalNet += c.totalNet;
+        acc.totalVatIncl += c.totalVatIncl;
+        acc.vatAmount += c.vatAmount;
+        acc.grossNet += Math.max(0, toNumber(ln.unitPrice)) * Math.max(0, toNumber(ln.qty));
+        return acc;
+      },
+      { totalNet: 0, totalVatIncl: 0, vatAmount: 0, grossNet: 0 }
+    );
+
+    const discountComputed = Math.max(0, sums.grossNet - sums.totalNet);
+    const tev = clamp(toNumber(invoiceCreateDraft?.tevfikatRate ?? 0), 0, 100);
+    const withheldVat = sums.vatAmount * (tev / 100);
+    const payableVat = sums.vatAmount - withheldVat;
+
+    return { ...sums, discountComputed, tev, withheldVat, payableVat };
+  }, [invoiceCreateLines, invoiceCreateDraft]);
+
+  function distributeCreateDiscount(discountTotal) {
+    const invLines = invoiceCreateLines.filter((x) => String(x.invoiceItem || "").trim());
+    if (invLines.length === 0) return alert("Kalem yok.");
+
+    const weights = invLines.map((ln) => Math.max(0, toNumber(ln.unitPrice)) * Math.max(0, toNumber(ln.qty)));
+    const sumW = weights.reduce((a, b) => a + b, 0);
+    if (sumW <= 0) return alert("Dağıtım için kalem tutarları 0'dan büyük olmalıdır.");
+
+    let allocated = 0;
+    const updated = invLines.map((ln, idx) => {
+      const w = weights[idx];
+      const share = idx === invLines.length - 1 ? discountTotal - allocated : (discountTotal * w) / sumW;
+      allocated += share;
+
+      const gross = w;
+      const rate = gross > 0 ? (share / gross) * 100 : 0;
+
+      return { ...ln, discountRate: String(clamp(rate, 0, 100)) };
+    });
+
+    setInvoiceCreateLines((prev) => {
+      const map = new Map(updated.map((u) => [u._key, u]));
+      return prev.map((x) => (map.has(x._key) ? map.get(x._key) : x));
+    });
+  }
+
+
 
   function saveInvoiceHeader() {
     if (!invoiceDraft) return;
@@ -783,6 +1117,35 @@ export default function App() {
               <button onClick={openPurchaseCreate} className="h-10 rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white shadow-sm hover:bg-slate-800">
                 Satınalım Ekle
               </button>
+
+              <button
+                onClick={exportPurchasesXlsx}
+                className="h-10 rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-900 hover:bg-slate-50"
+                title="Görünen (filtre + sıralama uygulanmış) listeyi Excel olarak indirir."
+              >
+                Excel’e Aktar
+              </button>
+
+              <button
+                onClick={() => importInputRef.current?.click()}
+                className="h-10 rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-900 hover:bg-slate-50"
+                title="Excel (.xlsx) dosyasından içe aktar."
+              >
+                Excel’den İçe Aktar
+              </button>
+
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  handleImportFile(f);
+                }}
+              />
+
             </div>
           </header>
 
@@ -1054,34 +1417,182 @@ export default function App() {
         </div>
       )}
 
-      {activeTab === "reports" && (
+      
+{activeTab === "reports" && (
         <div className="mx-auto max-w-[1650px] px-6 py-6">
-          <h1 className="text-2xl font-semibold tracking-tight">Raporlar</h1>
-          <p className="mt-2 text-sm text-slate-600">Bu sekme, mevcut prototip datası üzerinden örnek KPI’lar gösterir.</p>
+          <header className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight">Raporlar</h1>
+              <p className="mt-2 text-sm text-slate-600">Filtrelenmiş veri üzerinden tedarikçi / ürün / tarih bazlı özet ve basit grafikler.</p>
+            </div>
+          </header>
 
-          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-            <ReadOnly label="Toplam Fatura" value={money(reportKpis.totalInvoices)} />
-            <ReadOnly label="Toplam Satır" value={money(reportKpis.totalLines)} />
-            <ReadOnly label="Toplam Harcama (KDV Dahil)" value={money(reportKpis.totalVatIncl)} />
-            <ReadOnly label="Toplam Harcama (KDV Hariç)" value={money(reportKpis.totalNet)} />
-            <ReadOnly label="En Yüksek Tedarikçi" value={reportKpis.topSupplier} />
-            <ReadOnly label="En Yüksek Kalem" value={reportKpis.topProduct} />
+          {/* Filtreler */}
+          <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-12">
+            <div className="lg:col-span-3 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+              <div className="text-sm font-semibold text-slate-900">Tarih</div>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <Field label="Başlangıç">
+                  <input type="date" className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300" value={reportFrom} onChange={(e) => setReportFrom(e.target.value)} />
+                </Field>
+                <Field label="Bitiş">
+                  <input type="date" className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300" value={reportTo} onChange={(e) => setReportTo(e.target.value)} />
+                </Field>
+              </div>
+              <div className="mt-3 text-xs text-slate-600">Boş bırakılırsa tüm tarihleri kapsar.</div>
+            </div>
+
+            <div className="lg:col-span-3 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+              <div className="text-sm font-semibold text-slate-900">Kırılımlar</div>
+              <div className="mt-3 grid grid-cols-1 gap-3">
+                <Field label="Tedarikçi">
+                  <select className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300" value={reportSupplier} onChange={(e) => setReportSupplier(e.target.value)}>
+                    <option value="ALL">Tümü</option>
+                    {suppliers.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </Field>
+                <Field label="Ürün / Kalem">
+                  <select className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300" value={reportItem} onChange={(e) => setReportItem(e.target.value)}>
+                    <option value="ALL">Tümü</option>
+                    {items.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </Field>
+              </div>
+            </div>
+
+            <div className="lg:col-span-3 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+              <div className="text-sm font-semibold text-slate-900">Metod</div>
+              <div className="mt-3 grid grid-cols-1 gap-3">
+                <Field label="Tutar Alanı">
+                  <select className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300" value={reportMetric} onChange={(e) => setReportMetric(e.target.value)}>
+                    <option value="totalVatIncl">KDV Dahil</option>
+                    <option value="totalNet">KDV Hariç</option>
+                  </select>
+                </Field>
+                <button
+                  className="h-10 rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-900 hover:bg-slate-50"
+                  onClick={() => { setReportFrom(""); setReportTo(""); setReportSupplier("ALL"); setReportItem("ALL"); }}
+                >
+                  Filtreleri Temizle
+                </button>
+              </div>
+            </div>
+
+            <div className="lg:col-span-3 grid grid-cols-1 gap-3">
+              <ReadOnly label="Toplam Fatura" value={money(reportKpis.totalInvoices)} />
+              <ReadOnly label="Toplam Harcama (KDV Dahil)" value={money(reportKpis.totalVatIncl)} />
+              <ReadOnly label="Toplam Harcama (KDV Hariç)" value={money(reportKpis.totalNet)} />
+            </div>
           </div>
 
-          <div className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
-            <div className="text-sm font-semibold text-slate-900">Planlanan Raporlar</div>
-            <ul className="mt-2 list-disc pl-5 text-sm text-slate-700">
-              <li>Tedarikçi bazlı harcama trendi</li>
-              <li>Ürün bazlı harcama trendi</li>
-              <li>İskonto &amp; KDV analizi</li>
-              <li>Tevkifat özetleri</li>
-            </ul>
-          </div>
+          {(() => {
+            const rows = joined.filter((r) => {
+              if (reportSupplier !== "ALL" && r.supplierName !== reportSupplier) return false;
+              if (reportItem !== "ALL" && r.invoiceItem !== reportItem) return false;
+              if (reportFrom && r.date < reportFrom) return false;
+              if (reportTo && r.date > reportTo) return false;
+              return true;
+            });
+
+            const metricKey = reportMetric;
+            const topSup = [];
+            const mSup = new Map();
+            for (const r of rows) {
+              const c = calcLine(r);
+              const v = metricKey === "totalNet" ? c.totalNet : c.totalVatIncl;
+              mSup.set(r.supplierName, (mSup.get(r.supplierName) || 0) + v);
+            }
+            [...mSup.entries()]
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 8)
+              .forEach(([label, value]) => topSup.push({ label, value }));
+
+            const topProd = [];
+            const mProd = new Map();
+            for (const r of rows) {
+              const c = calcLine(r);
+              const v = metricKey === "totalNet" ? c.totalNet : c.totalVatIncl;
+              mProd.set(r.invoiceItem, (mProd.get(r.invoiceItem) || 0) + v);
+            }
+            [...mProd.entries()]
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 8)
+              .forEach(([label, value]) => topProd.push({ label, value }));
+
+            const trend = [];
+            const mTrend = new Map();
+            for (const r of rows) {
+              const c = calcLine(r);
+              const v = metricKey === "totalNet" ? c.totalNet : c.totalVatIncl;
+              const month = String(r.date || "").slice(0, 7);
+              if (!month) continue;
+              mTrend.set(month, (mTrend.get(month) || 0) + v);
+            }
+            [...mTrend.entries()].sort((a, b) => (a[0] > b[0] ? 1 : -1)).forEach(([label, value]) => trend.push({ label, value }));
+
+            return (
+              <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-12">
+                <div className="lg:col-span-6">
+                  <SimpleBarChart title="Tedarikçiye Göre Harcama (Top 8)" data={topSup} />
+                </div>
+                <div className="lg:col-span-6">
+                  <SimpleBarChart title="Ürüne Göre Harcama (Top 8)" data={topProd} />
+                </div>
+                <div className="lg:col-span-12">
+                  <SimpleLineChart title="Aylık Trend" data={trend} />
+                </div>
+
+                <div className="lg:col-span-12 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-semibold text-slate-900">Filtrelenmiş Detay (İlk 200 Satır)</div>
+                    <button
+                      className="h-9 rounded-xl border border-slate-300 bg-white px-4 text-xs font-semibold text-slate-900 hover:bg-slate-50"
+                      onClick={async () => {
+                        const exportRows = buildExportRows(rows.slice(0, 200));
+                        await exportToXlsx({ filename: "rapor_detay.xlsx", sheetName: "Detay", rows: exportRows, headers: purchaseExportHeaders });
+                      }}
+                      title="Filtrelenmiş detayın ilk 200 satırını Excel'e aktarır."
+                    >
+                      Excel’e Aktar
+                    </button>
+                  </div>
+
+                  <div className="mt-3 overflow-x-auto rounded-2xl ring-1 ring-slate-200">
+                    <table className="min-w-[1100px] w-full text-sm">
+                      <thead className="bg-slate-100 text-slate-700">
+                        <tr>
+                          <th className="px-3 py-3 text-left font-medium">Tarih</th>
+                          <th className="px-3 py-3 text-left font-medium">Tedarikçi</th>
+                          <th className="px-3 py-3 text-left font-medium">Kalem</th>
+                          <th className="px-3 py-3 text-right font-medium">KDV Hariç</th>
+                          <th className="px-3 py-3 text-right font-medium">KDV Dahil</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white">
+                        {rows.slice(0, 200).map((r) => {
+                          const c = calcLine(r);
+                          return (
+                            <tr key={r.id} className="border-t border-slate-200 hover:bg-slate-50">
+                              <td className="px-3 py-3">{r.date}</td>
+                              <td className="px-3 py-3">{r.supplierName}</td>
+                              <td className="px-3 py-3">{r.invoiceItem}</td>
+                              <td className="px-3 py-3 text-right tabular-nums">{money(c.totalNet)}</td>
+                              <td className="px-3 py-3 text-right tabular-nums">{money(c.totalVatIncl)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="mt-3 text-xs text-slate-600">Not: Grafikler prototip amaçlı basit SVG çizimleridir.</div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
-
-      {/* Sağ Panel: Satır Düzenle */}
-      {linePanelOpen && lineDraft && (
+{linePanelOpen && lineDraft && (
         <div className="fixed inset-0 z-50">
           <div className="absolute inset-0 bg-black/30" onMouseDown={(e) => { if (e.target === e.currentTarget) setLinePanelOpen(false); }} />
           <div className="absolute right-0 top-0 h-full w-full max-w-xl bg-white shadow-2xl ring-1 ring-slate-200">
@@ -1604,8 +2115,58 @@ export default function App() {
                   </div>
                 </div>
 
+
+                {/* Fatura Mali Döküm */}
+                <div className="lg:col-span-4 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-slate-900">Fatura Mali Döküm</div>
+                    <button
+                      className="h-9 rounded-xl border border-slate-300 bg-white px-4 text-xs font-semibold text-slate-900 hover:bg-slate-50"
+                      onClick={() => {
+                        const t = Math.max(0, toNumber(invoiceCreateDraft.discountTotal));
+                        if (t <= 0) return alert("Toplam iskonto 0'dan büyük olmalıdır.");
+                        distributeCreateDiscount(t);
+                      }}
+                      title="Toplam iskontoyu kalem tutarlarına göre dağıtır (sonradan satır bazında düzenlenebilir)."
+                    >
+                      İskontoyu Kalemlere Dağıt
+                    </button>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 gap-3">
+                    <Field label="Tevkifat %">
+                      <input
+                        inputMode="decimal"
+                        className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300"
+                        value={invoiceCreateDraft.tevfikatRate}
+                        onChange={(e) => setInvoiceCreateDraft((p) => ({ ...p, tevfikatRate: e.target.value }))}
+                      />
+                    </Field>
+
+                    <Field label="Toplam İskonto (₺)" hint="(opsiyonel)">
+                      <input
+                        inputMode="decimal"
+                        className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300"
+                        value={invoiceCreateDraft.discountTotal}
+                        onChange={(e) => setInvoiceCreateDraft((p) => ({ ...p, discountTotal: e.target.value }))}
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <ReadOnly label="Kalem Toplamı (KDV Hariç)" value={money(createComputed.totalNet)} />
+                    <ReadOnly label="Toplam İskonto (Hesaplanan)" value={money(createComputed.discountComputed)} />
+                    <ReadOnly label="Toplam KDV" value={money(createComputed.vatAmount)} />
+                    <ReadOnly label="Toplam Tevkifat (KDV)" value={money(createComputed.withheldVat)} />
+                  </div>
+
+                  <div className="mt-3">
+                    <ReadOnly label="KDV Dahil Genel Toplam" value={money(createComputed.totalVatIncl)} />
+                  </div>
+                </div>
+
                 {/* Kalemler */}
-                <div className="lg:col-span-8 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+                <div className="lg:col-span-12 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
                   <div className="mb-3 flex items-center justify-between">
                     <div className="text-sm font-semibold text-slate-900">Fatura Kalemleri</div>
                     <div className="text-xs text-slate-600">Kalem adı boş olan satırlar kaydedilmez.</div>
