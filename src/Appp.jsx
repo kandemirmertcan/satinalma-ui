@@ -184,6 +184,7 @@ export default function App() {
   const [activeInvoiceId, setActiveInvoiceId] = useState(null);
   const [activeInvoiceLineId, setActiveInvoiceLineId] = useState(null);
   const [invoiceDraft, setInvoiceDraft] = useState(null);
+  const [invoiceLineDraftOverrides, setInvoiceLineDraftOverrides] = useState({});
 
   const [invoiceCreateOpen, setInvoiceCreateOpen] = useState(false);
   const [invoiceCreateDraft, setInvoiceCreateDraft] = useState(() => ({
@@ -362,7 +363,7 @@ export default function App() {
     });
 
     const firstLine = lines.find((x) => x.invoiceId === invoiceId);
-    setActiveInvoiceLineId(firstLine?.id ?? null);
+    selectInvoiceLine(firstLine?.id ?? null);
     setInvoiceModalOpen(true);
   }
 
@@ -440,11 +441,10 @@ export default function App() {
     return lines.find((x) => x.id === activeInvoiceLineId) ?? null;
   }, [lines, activeInvoiceLineId]);
 
-  const [invoiceLineDraft, setInvoiceLineDraft] = useState(null);
-
-  useEffect(() => {
-    if (!activeInvoiceLine) return setInvoiceLineDraft(null);
-    setInvoiceLineDraft({
+  const invoiceLineDraft = useMemo(() => {
+    if (!activeInvoiceLine) return null;
+    const overrides = invoiceLineDraftOverrides[activeInvoiceLine.id] ?? {};
+    return {
       id: activeInvoiceLine.id,
       invoiceId: activeInvoiceLine.invoiceId,
       invoiceItem: activeInvoiceLine.invoiceItem,
@@ -453,8 +453,28 @@ export default function App() {
       unitPrice: activeInvoiceLine.unitPrice,
       discountRate: activeInvoiceLine.discountRate,
       vatRate: activeInvoiceLine.vatRate,
+      ...overrides,
+    };
+  }, [activeInvoiceLine, invoiceLineDraftOverrides]);
+
+  function selectInvoiceLine(lineId) {
+    setActiveInvoiceLineId(lineId);
+    setInvoiceLineDraftOverrides((prev) => {
+      if (!lineId || !prev[lineId]) return prev;
+      const next = { ...prev };
+      delete next[lineId];
+      return next;
     });
-  }, [activeInvoiceLineId, activeInvoiceLine]);
+  }
+
+  function updateInvoiceLineDraft(next) {
+    setInvoiceLineDraftOverrides((prev) => {
+      if (!activeInvoiceLineId || !invoiceLineDraft) return prev;
+      const current = prev[activeInvoiceLineId] ?? {};
+      const resolved = typeof next === "function" ? next(invoiceLineDraft) : { ...invoiceLineDraft, ...next };
+      return { ...prev, [activeInvoiceLineId]: { ...current, ...resolved } };
+    });
+  }
 
   function saveInvoiceLineDraft() {
     if (!invoiceLineDraft) return;
@@ -470,6 +490,11 @@ export default function App() {
     };
 
     setLines((prev) => prev.map((x) => (x.id === payload.id ? payload : x)));
+    setInvoiceLineDraftOverrides((prev) => {
+      const next = { ...prev };
+      delete next[payload.id];
+      return next;
+    });
   }
 
   function openInvoiceCreate() {
@@ -889,17 +914,17 @@ export default function App() {
                     <div className="mt-3 grid grid-cols-1 gap-3">
                       <Field label="Fatura Kalemi" hint="(autocomplete)">
                         <input list="itemList" className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300"
-                          value={invoiceLineDraft.invoiceItem} onChange={(e) => setInvoiceLineDraft((p) => ({ ...p, invoiceItem: e.target.value }))} />
+                          value={invoiceLineDraft.invoiceItem} onChange={(e) => updateInvoiceLineDraft({ invoiceItem: e.target.value })} />
                       </Field>
 
                       <div className="grid grid-cols-2 gap-3">
                         <Field label="Adet">
                           <input inputMode="decimal" className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300"
-                            value={invoiceLineDraft.qty} onChange={(e) => setInvoiceLineDraft((p) => ({ ...p, qty: e.target.value }))} />
+                            value={invoiceLineDraft.qty} onChange={(e) => updateInvoiceLineDraft({ qty: e.target.value })} />
                         </Field>
                         <Field label="Birim Türü">
                           <select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300"
-                            value={invoiceLineDraft.unitType} onChange={(e) => setInvoiceLineDraft((p) => ({ ...p, unitType: e.target.value }))}>
+                            value={invoiceLineDraft.unitType} onChange={(e) => updateInvoiceLineDraft({ unitType: e.target.value })}>
                             {UNIT_TYPES.map((u) => <option key={u} value={u}>{u}</option>)}
                           </select>
                         </Field>
@@ -907,28 +932,28 @@ export default function App() {
 
                       <Field label="Birim Fiyat">
                         <input inputMode="decimal" className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300"
-                          value={invoiceLineDraft.unitPrice} onChange={(e) => setInvoiceLineDraft((p) => ({ ...p, unitPrice: e.target.value }))} />
+                          value={invoiceLineDraft.unitPrice} onChange={(e) => updateInvoiceLineDraft({ unitPrice: e.target.value })} />
                       </Field>
 
                       <div className="grid grid-cols-2 gap-3">
                         <Field label="İskonto Oranı %">
                           <input inputMode="decimal" className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300"
-                            value={invoiceLineDraft.discountRate} onChange={(e) => setInvoiceLineDraft((p) => ({ ...p, discountRate: e.target.value }))} />
+                            value={invoiceLineDraft.discountRate} onChange={(e) => updateInvoiceLineDraft({ discountRate: e.target.value })} />
                         </Field>
                         <Field label="KDV Oranı %">
                           <input inputMode="decimal" className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300"
-                            value={invoiceLineDraft.vatRate} onChange={(e) => setInvoiceLineDraft((p) => ({ ...p, vatRate: e.target.value }))} />
+                            value={invoiceLineDraft.vatRate} onChange={(e) => updateInvoiceLineDraft({ vatRate: e.target.value })} />
                         </Field>
                       </div>
 
                       <div className="grid grid-cols-2 gap-3">
                         <Field label="İskontolu Birim (Elle)" hint="KDV hariç">
                           <input inputMode="decimal" className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300"
-                            value={money(invoiceLineDraftComputed.unitNet)} onChange={(e) => setInvoiceLineDraft((p) => deriveFromUnitNet(p, e.target.value))} />
+                            value={money(invoiceLineDraftComputed.unitNet)} onChange={(e) => updateInvoiceLineDraft((p) => deriveFromUnitNet(p, e.target.value))} />
                         </Field>
                         <Field label="KDV Dahil Birim (Elle)">
                           <input inputMode="decimal" className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300"
-                            value={money(invoiceLineDraftComputed.unitVatIncl)} onChange={(e) => setInvoiceLineDraft((p) => deriveFromUnitVatIncl(p, e.target.value))} />
+                            value={money(invoiceLineDraftComputed.unitVatIncl)} onChange={(e) => updateInvoiceLineDraft((p) => deriveFromUnitVatIncl(p, e.target.value))} />
                         </Field>
                       </div>
 
@@ -974,7 +999,7 @@ export default function App() {
                               <tr key={ln.id}
                                 className={"border-t border-slate-200 " + (active ? "bg-slate-900 text-white" : "bg-white hover:bg-slate-50")}
                                 style={{ cursor: "pointer" }}
-                                onClick={() => setActiveInvoiceLineId(ln.id)}>
+                                onClick={() => selectInvoiceLine(ln.id)}>
                                 <td className="px-3 py-3">{ln.invoiceItem}</td>
                                 <td className="px-3 py-3 text-right tabular-nums">{money(c.q)}</td>
                                 <td className="px-3 py-3">{ln.unitType}</td>

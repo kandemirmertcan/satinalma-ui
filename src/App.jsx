@@ -321,7 +321,7 @@ export default function App() {
   const [invoiceDraft, setInvoiceDraft] = useState(null);
 
   // Fatura içi kalem edit
-  const [invoiceLineDraft, setInvoiceLineDraft] = useState(null);
+  const [invoiceLineDraftOverrides, setInvoiceLineDraftOverrides] = useState({});
   const [invLineUnitNetRaw, setInvLineUnitNetRaw] = useState("");
   const [invLineUnitVatRaw, setInvLineUnitVatRaw] = useState("");
 
@@ -496,7 +496,7 @@ export default function App() {
     });
 
     const firstLine = lines.find((x) => x.invoiceId === invoiceId);
-    setActiveInvoiceLineId(firstLine?.id ?? null);
+    selectInvoiceLine(firstLine?.id ?? null);
     setInvoiceModalOpen(true);
   }
 
@@ -577,21 +577,42 @@ export default function App() {
     return lines.find((x) => x.id === activeInvoiceLineId) ?? null;
   }, [lines, activeInvoiceLineId]);
 
-  useEffect(() => {
-    if (!activeInvoiceLine) return setInvoiceLineDraft(null);
-    setInvoiceLineDraft({
+  const invoiceLineDraft = useMemo(() => {
+    if (!activeInvoiceLine) return null;
+    const overrides = invoiceLineDraftOverrides[activeInvoiceLine.id] ?? {};
+    return {
       id: activeInvoiceLine.id,
       invoiceId: activeInvoiceLine.invoiceId,
       invoiceItem: activeInvoiceLine.invoiceItem,
-      qty: activeInvoiceLine.qty ?? "",
+      qty: String(activeInvoiceLine.qty ?? ""),
       unitType: activeInvoiceLine.unitType,
-      unitPrice: activeInvoiceLine.unitPrice ?? "",
-      discountRate: activeInvoiceLine.discountRate ?? "",
-      vatRate: activeInvoiceLine.vatRate ?? "",
-    });
+      unitPrice: String(activeInvoiceLine.unitPrice ?? ""),
+      discountRate: String(activeInvoiceLine.discountRate ?? ""),
+      vatRate: String(activeInvoiceLine.vatRate ?? ""),
+      ...overrides,
+    };
+  }, [activeInvoiceLine, invoiceLineDraftOverrides]);
+
+  function selectInvoiceLine(lineId) {
+    setActiveInvoiceLineId(lineId);
     setInvLineUnitNetRaw("");
     setInvLineUnitVatRaw("");
-  }, [activeInvoiceLineId, activeInvoiceLine]);
+    setInvoiceLineDraftOverrides((prev) => {
+      if (!lineId || !prev[lineId]) return prev;
+      const next = { ...prev };
+      delete next[lineId];
+      return next;
+    });
+  }
+
+  function updateInvoiceLineDraft(next) {
+    setInvoiceLineDraftOverrides((prev) => {
+      if (!activeInvoiceLineId || !invoiceLineDraft) return prev;
+      const current = prev[activeInvoiceLineId] ?? {};
+      const resolved = typeof next === "function" ? next(invoiceLineDraft) : { ...invoiceLineDraft, ...next };
+      return { ...prev, [activeInvoiceLineId]: { ...current, ...resolved } };
+    });
+  }
 
   function saveInvoiceLineDraft() {
     if (!invoiceLineDraft) return;
@@ -609,6 +630,11 @@ export default function App() {
     };
 
     setLines((prev) => prev.map((x) => (x.id === payload.id ? payload : x)));
+    setInvoiceLineDraftOverrides((prev) => {
+      const next = { ...prev };
+      delete next[payload.id];
+      return next;
+    });
   }
 
   function openPurchaseCreate() {
@@ -1365,7 +1391,7 @@ export default function App() {
                           list="itemList"
                           className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300"
                           value={invoiceLineDraft.invoiceItem}
-                          onChange={(e) => setInvoiceLineDraft((p) => ({ ...p, invoiceItem: e.target.value }))}
+                          onChange={(e) => updateInvoiceLineDraft({ invoiceItem: e.target.value })}
                         />
                       </Field>
 
@@ -1375,14 +1401,14 @@ export default function App() {
                             inputMode="decimal"
                             className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300"
                             value={invoiceLineDraft.qty}
-                            onChange={(e) => setInvoiceLineDraft((p) => ({ ...p, qty: e.target.value }))}
+                            onChange={(e) => updateInvoiceLineDraft({ qty: e.target.value })}
                           />
                         </Field>
                         <Field label="Birim Türü">
                           <select
                             className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300"
                             value={invoiceLineDraft.unitType}
-                            onChange={(e) => setInvoiceLineDraft((p) => ({ ...p, unitType: e.target.value }))}
+                            onChange={(e) => updateInvoiceLineDraft({ unitType: e.target.value })}
                           >
                             {UNIT_TYPES.map((u) => <option key={u} value={u}>{u}</option>)}
                           </select>
@@ -1394,7 +1420,7 @@ export default function App() {
                           inputMode="decimal"
                           className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300"
                           value={invoiceLineDraft.unitPrice}
-                          onChange={(e) => setInvoiceLineDraft((p) => ({ ...p, unitPrice: e.target.value }))}
+                          onChange={(e) => updateInvoiceLineDraft({ unitPrice: e.target.value })}
                         />
                       </Field>
 
@@ -1404,7 +1430,7 @@ export default function App() {
                             inputMode="decimal"
                             className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300"
                             value={invoiceLineDraft.discountRate}
-                            onChange={(e) => setInvoiceLineDraft((p) => ({ ...p, discountRate: e.target.value }))}
+                            onChange={(e) => updateInvoiceLineDraft({ discountRate: e.target.value })}
                           />
                         </Field>
                         <Field label="KDV Oranı %">
@@ -1412,7 +1438,7 @@ export default function App() {
                             inputMode="decimal"
                             className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300"
                             value={invoiceLineDraft.vatRate}
-                            onChange={(e) => setInvoiceLineDraft((p) => ({ ...p, vatRate: e.target.value }))}
+                            onChange={(e) => updateInvoiceLineDraft({ vatRate: e.target.value })}
                           />
                         </Field>
                       </div>
@@ -1426,7 +1452,7 @@ export default function App() {
                             onChange={(e) => {
                               const raw = e.target.value;
                               setInvLineUnitNetRaw(raw);
-                              setInvoiceLineDraft((p) => deriveFromUnitNet(p, raw));
+                              updateInvoiceLineDraft((p) => deriveFromUnitNet(p, raw));
                             }}
                             onBlur={() => setInvLineUnitNetRaw("")}
                           />
@@ -1439,7 +1465,7 @@ export default function App() {
                             onChange={(e) => {
                               const raw = e.target.value;
                               setInvLineUnitVatRaw(raw);
-                              setInvoiceLineDraft((p) => deriveFromUnitVatIncl(p, raw));
+                              updateInvoiceLineDraft((p) => deriveFromUnitVatIncl(p, raw));
                             }}
                             onBlur={() => setInvLineUnitVatRaw("")}
                           />
@@ -1490,7 +1516,7 @@ export default function App() {
                                 key={ln.id}
                                 className={"border-t border-slate-200 " + (active ? "bg-slate-900 text-white" : "bg-white hover:bg-slate-50")}
                                 style={{ cursor: "pointer" }}
-                                onClick={() => setActiveInvoiceLineId(ln.id)}
+                                onClick={() => selectInvoiceLine(ln.id)}
                               >
                                 <td className="px-3 py-3">{ln.invoiceItem}</td>
                                 <td className="px-3 py-3 text-right tabular-nums">{money(c.q)}</td>
